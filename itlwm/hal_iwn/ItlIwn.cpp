@@ -1755,7 +1755,7 @@ iwn_read_eeprom_enhinfo(struct iwn_softc *sc)
 
     memset(sc->enh_maxpwr, 0, sizeof sc->enh_maxpwr);
     for (i = 0; i < nitems(enhinfo); i++) {
-        if (enhinfo[i].chan == 0 || enhinfo[i].reserved != 0)
+        if ((enhinfo[i].flags & IWN_TXP_VALID) == 0)
             continue;    /* Skip invalid entries. */
 
         maxpwr = 0;
@@ -2210,7 +2210,7 @@ iwn_rx_done(struct iwn_softc *sc, struct iwn_rx_desc *desc,
     }
     ni = ieee80211_find_rxnode(ic, wh);
 
-    rxi.rxi_flags = 0;
+    memset(&rxi, 0, sizeof(rxi));
     if (((wh->i_fc[0] & IEEE80211_FC0_TYPE_MASK) != IEEE80211_FC0_TYPE_CTL)
         && (wh->i_fc[1] & IEEE80211_FC1_PROTECTED) &&
         !IEEE80211_IS_MULTICAST(wh->i_addr1) &&
@@ -2299,7 +2299,6 @@ iwn_rx_done(struct iwn_softc *sc, struct iwn_rx_desc *desc,
 
     /* Send the frame to the 802.11 layer. */
     rxi.rxi_rssi = rssi;
-    rxi.rxi_tstamp = 0;    /* unused */
     rxi.rxi_chan = chan;
     ieee80211_inputm(ifp, m, ni, &rxi, ml);
 
@@ -3598,7 +3597,10 @@ iwn_tx(struct iwn_softc *sc, mbuf_t m, struct ieee80211_node *ni)
         }
     }
 
-    if (IEEE80211_IS_MULTICAST(wh->i_addr1) ||
+    if (type == IEEE80211_FC0_TYPE_CTL &&
+        subtype == IEEE80211_FC0_SUBTYPE_BAR)
+        tx->id = wn->id;
+    else if (IEEE80211_IS_MULTICAST(wh->i_addr1) ||
         type != IEEE80211_FC0_TYPE_DATA)
         tx->id = sc->broadcast_id;
     else
@@ -4062,17 +4064,12 @@ iwn_set_link_quality(struct iwn_softc *sc, struct ieee80211_node *ni)
         if (sc->hw_type != IWN_HW_REV_TYPE_4965)
             linkq.flags |= IWN_LINK_QUAL_FLAGS_SET_STA_TLC_RTS;
 
-    if (ieee80211_node_supports_ht_sgi20(ni)) {
+    if (ieee80211_node_supports_ht_sgi20(ni))
         sgi_ok = 1;
-    }
-    
+
     if (ni->ni_chw == IEEE80211_CHAN_WIDTH_40) {
         is_40mhz = 1;
-        if (ieee80211_node_supports_ht_sgi40(ni)) {
-            sgi_ok = 1;
-        } else {
-            sgi_ok = 0;
-        }
+        sgi_ok = ieee80211_node_supports_ht_sgi40(ni);
     }
     
     /*
@@ -4106,15 +4103,17 @@ iwn_set_link_quality(struct iwn_softc *sc, struct ieee80211_node *ni)
             for (i = ni->ni_txmcs; i >= 0; i--) {
                 if (isclr(ni->ni_rxmcs, i))
                     continue;
-                if (ridx == iwn_mcs2ridx[i]) {
-                    tab = ht_plcp;
-                    rflags |= IWN_RFLAG_MCS;
-                    if (sgi_ok)
-                        rflags |= IWN_RFLAG_SGI;
-                    if (is_40mhz)
-                        rflags |= IWN_RFLAG_HT40;
+                if (ridx != iwn_mcs2ridx[i])
+                    continue;
+                tab = ht_plcp;
+                rflags |= IWN_RFLAG_MCS;
+                /* First two Tx attempts may use 40MHz/SGI. */
+                if (j > 1)
                     break;
-                }
+                if (is_40mhz)
+                    rflags |= IWN_RFLAG_HT40;
+                if (sgi_ok)
+                    rflags |= IWN_RFLAG_SGI;
             }
         } else if (plcp != IWN_RATE_INVM_PLCP) {
             for (i = ni->ni_txrate; i >= 0; i--) {
