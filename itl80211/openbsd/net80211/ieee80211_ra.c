@@ -370,8 +370,6 @@ ieee80211_ra_next_rateset(struct ieee80211_ra_node *rn, struct ieee80211com *ic,
                 continue;
             if (rsnext->nss > support_nss(ni))
                 continue;
-            if (rsnext->sgi && !ieee80211_node_supports_sgi(ni))
-                continue;
             found = true;
             break;
         }
@@ -384,8 +382,6 @@ ieee80211_ra_next_rateset(struct ieee80211_ra_node *rn, struct ieee80211com *ic,
             if (rsnext->band_width > ni->ni_chw)
                 continue;
             if (rsnext->nss > support_nss(ni))
-                continue;
-            if (rsnext->sgi && !ieee80211_node_supports_sgi(ni))
                 continue;
             found = true;
             break;
@@ -744,7 +740,7 @@ ieee80211_ra_add_stats_ht(struct ieee80211_ra_node *rn,
     static const uint64_t alpha = RA_FP_1 / 8; /* 1/8 = 0.125 */
     static const uint64_t beta =  RA_FP_1 / 4; /* 1/4 = 0.25 */
     int s;
-    struct ieee80211_ra_goodput_stats *g = &rn->g[mcs];
+    struct ieee80211_ra_goodput_stats *g;
     uint64_t sfer, rate, delta;
 
     /*
@@ -758,6 +754,7 @@ ieee80211_ra_add_stats_ht(struct ieee80211_ra_node *rn,
 
     s = splnet();
 
+    g = &rn->g[mcs];
     g->nprobe_pkts += total;
     g->nprobe_fail += fail;
 
