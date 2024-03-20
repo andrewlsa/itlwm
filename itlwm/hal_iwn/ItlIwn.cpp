@@ -550,12 +550,12 @@ iwn_attach(struct iwn_softc *sc, struct pci_attach_args *pa)
             ieee80211_std_rateset_11a;
     }
     if (sc->sc_flags & IWN_FLAG_HAS_11N) {
-        int ntxstreams = sc->ntxchains;
-        int nrxstreams = sc->nrxchains;
-        
         /* Set supported HT rates. */
         if (ic->ic_userflags & IEEE80211_F_NOMIMO)
-            ntxstreams = nrxstreams = 1;
+            sc->ntxchains = sc->nrxchains = 1;
+
+        int ntxstreams = sc->ntxchains;
+        int nrxstreams = sc->nrxchains;
 
         ic->ic_sup_mcs[0] = 0xff;        /* MCS 0-7 */
         if (nrxstreams > 1)
@@ -4047,7 +4047,7 @@ iwn_set_link_quality(struct iwn_softc *sc, struct ieee80211_node *ni)
     struct iwn_cmd_link_quality linkq;
     struct ieee80211_rateset *rs = &ni->ni_rates;
     uint8_t txant;
-    int i, ridx, ridx_min, ridx_max, j, sgi_ok = 0, is_40mhz = 0, mimo, tab = 0, rflags = 0;
+    int i, ridx, ridx_min, ridx_max, j, mimo, tab = 0, rflags = 0;
 
     /* Use the first valid TX antenna. */
     txant = IWN_LSB(sc->txchainmask);
@@ -4060,17 +4060,17 @@ iwn_set_link_quality(struct iwn_softc *sc, struct ieee80211_node *ni)
     linkq.ampdu_threshold = 3;
     linkq.ampdu_limit = htole16(4000);    /* 4ms */
 
-    if (ic->ic_flags & IEEE80211_F_USEPROT)
-        if (sc->hw_type != IWN_HW_REV_TYPE_4965)
+#if 0 // RTS/CTS protection not yet tested
+    if (ni->ni_flags & IEEE80211_NODE_HT &&
+        sc->agg_queue_mask > 0 &&
+        ic->ic_flags & IEEE80211_F_USEPROT)
+        if (sc->hw_type != IWN_HW_REV_TYPE_4965 &&
+            sc->hw_type != IWN_HW_REV_TYPE_5300 &&
+            sc->hw_type != IWN_HW_REV_TYPE_5150 &&
+            sc->hw_type != IWN_HW_REV_TYPE_5350 &&
+            sc->hw_type != IWN_HW_REV_TYPE_5100)
             linkq.flags |= IWN_LINK_QUAL_FLAGS_SET_STA_TLC_RTS;
-
-    if (ieee80211_node_supports_ht_sgi20(ni))
-        sgi_ok = 1;
-
-    if (ni->ni_chw == IEEE80211_CHAN_WIDTH_40) {
-        is_40mhz = 1;
-        sgi_ok = ieee80211_node_supports_ht_sgi40(ni);
-    }
+#endif
     
     /*
      * Fill the LQ rate selection table with legacy and/or HT rates
@@ -4101,7 +4101,8 @@ iwn_set_link_quality(struct iwn_softc *sc, struct ieee80211_node *ni)
                 (!mimo && iwn_is_mimo_ht_plcp(ht_plcp)))
                 continue;
             for (i = ni->ni_txmcs; i >= 0; i--) {
-                if (isclr(ni->ni_rxmcs, i))
+                if (ic->ic_tx_mcs_set == IEEE80211_TX_MCS_SET_DEFINED &&
+                    isclr(ni->ni_rxmcs, i))
                     continue;
                 if (ridx != iwn_mcs2ridx[i])
                     continue;
@@ -4110,9 +4111,9 @@ iwn_set_link_quality(struct iwn_softc *sc, struct ieee80211_node *ni)
                 /* First two Tx attempts may use 40MHz/SGI. */
                 if (j > 1)
                     break;
-                if (is_40mhz)
+                if (iwn_rxon_ht40_enabled(sc))
                     rflags |= IWN_RFLAG_HT40;
-                if (sgi_ok)
+                if (ieee80211_ra_use_ht_sgi(ni))
                     rflags |= IWN_RFLAG_SGI;
             }
         } else if (plcp != IWN_RATE_INVM_PLCP) {
